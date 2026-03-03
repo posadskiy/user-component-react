@@ -21,11 +21,15 @@ import { Edit as EditIcon, Save as SaveIcon, VerifiedUser as VerifiedUserIcon, D
 import axios from 'axios';
 import { User, UserServiceProps } from '../types';
 
+const defaultCardSx = { maxWidth: 600, margin: '0 auto', mt: 4 };
+
 export const UserService: React.FC<UserServiceProps> = ({
   apiUrl,
   userId,
   onError,
   onSuccess,
+  className,
+  sx,
 }) => {
   const [user, setUser] = React.useState<User | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -131,7 +135,7 @@ export const UserService: React.FC<UserServiceProps> = ({
   }
 
   return (
-    <Card sx={{ maxWidth: 600, margin: '0 auto', mt: 4 }}>
+    <Card className={className} sx={{ ...defaultCardSx, ...sx }}>
       <CardContent>
         <Box display="flex" alignItems="center" mb={3}>
           <Avatar

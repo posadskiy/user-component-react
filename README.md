@@ -37,6 +37,23 @@ function App() {
 }
 ```
 
+## Styles
+
+**Styles are included.** The component uses Material-UI (CSS-in-JS); wrap your app in MUI's `ThemeProvider` (and optionally `CssBaseline`) so the component is styled by default.
+
+To override the default card layout, pass **`className`** or **`sx`** (MUI's style prop):
+
+```tsx
+<UserService
+  apiUrl="..."
+  userId="user123"
+  className="my-profile-card"
+  sx={{ maxWidth: 500, mt: 2 }}
+  onError={handleError}
+  onSuccess={handleSuccess}
+/>
+```
+
 ## Props
 
 | Prop | Type | Required | Description |
@@ -46,6 +63,8 @@ function App() {
 | bearerToken | string | Yes | JWT token for API authentication |
 | onError | (error: Error) => void | No | Callback function for error handling |
 | onSuccess | (message: string) => void | No | Callback function for success messages |
+| className | string | No | Class name for the root card |
+| sx | object | No | MUI `sx` prop for the root card (merged with defaults) |
 
 ## Features
 
