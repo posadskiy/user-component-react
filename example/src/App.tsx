@@ -1,4 +1,4 @@
-import { UserService } from './UserService';
+import { UserService } from 'user-component-react';
 
 function App() {
   const handleError = (error: Error) => {
@@ -9,13 +9,11 @@ function App() {
     console.log('Success:', message);
   };
 
-  // For local testing, update these values:
-  // 1. Get a JWT token from auth-service (see TESTING.md)
-  // 2. Update userId to match the user ID in the token
-  // 3. Ensure user-service is running on localhost:8095
-  const bearerToken = import.meta.env.VITE_BEARER_TOKEN || 'YOUR_JWT_TOKEN_HERE';
-  const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:9000';
-  const userId = import.meta.env.VITE_USER_ID || '1';
+  // For local testing: set VITE_BEARER_TOKEN, VITE_API_URL, VITE_USER_ID in .env
+  // or ensure user-service is running on localhost:8095 and get a JWT from auth-service
+  const bearerToken = import.meta.env.VITE_BEARER_TOKEN || undefined;
+  const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8095';
+  const userId = import.meta.env.VITE_USER_ID || 'me';
 
   return (
     <div className="App">

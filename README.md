@@ -22,13 +22,13 @@ function App() {
     console.log('Success:', message);
   };
 
-  // In a real application, this token would typically come from your authentication system
+  // Pass your JWT when the API requires authentication (optional; omit for unauthenticated requests)
   const bearerToken = 'your-jwt-token-here';
 
   return (
     <UserService
       apiUrl="https://your-api-url.com"
-      userId="user123"
+      userId="me"
       bearerToken={bearerToken}
       onError={handleError}
       onSuccess={handleSuccess}
@@ -59,8 +59,8 @@ To override the default card layout, pass **`className`** or **`sx`** (MUI's sty
 | Prop | Type | Required | Description |
 |------|------|----------|-------------|
 | apiUrl | string | Yes | The base URL of your user service API |
-| userId | string | Yes | The ID of the user to display/edit |
-| bearerToken | string | Yes | JWT token for API authentication |
+| userId | string | Yes | The ID of the user to display/edit (use `"me"` for current user) |
+| bearerToken | string \| null | No | JWT for API authentication; when omitted, requests are sent without Authorization (may get 401) |
 | onError | (error: Error) => void | No | Callback function for error handling |
 | onSuccess | (message: string) => void | No | Callback function for success messages |
 | className | string | No | Class name for the root card |
@@ -83,8 +83,9 @@ The component uses the following API endpoints:
 
 - GET `/v0/user/{userId}` - Fetch user information
 - PUT `/v0/user/{userId}` - Update user information
+- DELETE `/v0/user/{userId}` - Delete user account
 
-All requests include the Bearer token in the Authorization header.
+When `bearerToken` is provided, all requests include the Bearer token in the `Authorization` header.
 
 ## Development
 

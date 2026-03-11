@@ -23,9 +23,17 @@ import { User, UserServiceProps } from '../types';
 
 const defaultCardSx = { maxWidth: 600, margin: '0 auto', mt: 4 };
 
+function authHeaders(bearerToken?: string | null): Record<string, string> {
+  if (bearerToken && bearerToken.trim()) {
+    return { Authorization: `Bearer ${bearerToken.trim()}` };
+  }
+  return {};
+}
+
 export const UserService: React.FC<UserServiceProps> = ({
   apiUrl,
   userId,
+  bearerToken,
   onError,
   onSuccess,
   className,
@@ -41,13 +49,15 @@ export const UserService: React.FC<UserServiceProps> = ({
   const [deleteError, setDeleteError] = React.useState<string | null>(null);
   const [deleting, setDeleting] = React.useState(false);
 
+  const headers = React.useMemo(() => authHeaders(bearerToken), [bearerToken]);
+
   React.useEffect(() => {
     fetchUserData();
-  }, [apiUrl, userId]);
+  }, [apiUrl, userId, bearerToken]);
 
   const fetchUserData = async () => {
     try {
-      const response = await axios.get(`${apiUrl}/v0/user/${userId}`);
+      const response = await axios.get(`${apiUrl}/v0/user/${userId}`, { headers });
       setUser(response.data);
       setUsername(response.data.username || '');
       setImageError(false);
@@ -71,6 +81,7 @@ export const UserService: React.FC<UserServiceProps> = ({
         {
           headers: {
             'Content-Type': 'application/json',
+            ...headers,
           },
         }
       );
@@ -111,6 +122,7 @@ export const UserService: React.FC<UserServiceProps> = ({
       await axios.delete(`${apiUrl}/v0/user/${userId}`, {
         headers: {
           'Content-Type': 'application/json',
+          ...headers,
         },
       });
       setDeleteDialogOpen(false);
