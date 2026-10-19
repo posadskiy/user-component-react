@@ -15,7 +15,8 @@ import { UserService } from 'user-component-react';
 
 function App() {
   const handleError = (error: Error) => {
-    console.error('Error:', error);
+    // `error` is a sanitized Error. It does not include the bearer token or the raw response.
+    console.error(error.message);
   };
 
   const handleSuccess = (message: string) => {
@@ -59,12 +60,14 @@ To override the default card layout, pass **`className`** or **`sx`** (MUI's sty
 | Prop | Type | Required | Description |
 |------|------|----------|-------------|
 | apiUrl | string | Yes | The base URL of your user service API |
-| userId | string | Yes | The ID of the user to display/edit (use `"me"` for current user) |
+| userId | string | Yes | The ID of the user to display/edit (use `"me"` for current user). Inserted wherever a URL contains `{userId}`. |
+| urls | UserUrls | No | Paths or absolute URLs for get, update, and delete. `{userId}` is URL-encoded. Defaults to `/v0/user/{userId}` for every method. |
 | bearerToken | string \| null | No | JWT for API authentication; when omitted, requests are sent without Authorization (may get 401) |
-| onError | (error: Error) => void | No | Callback function for error handling |
-| onSuccess | (message: string) => void | No | Callback function for success messages |
+| onError | (error: Error) => void | No | Sanitized error callback. The error has no request config or token. |
+| onSuccess | (message: string) => void | No | Callback for a successful update or deletion. The card also shows the message. |
+| allowDelete | boolean | No | Show account deletion. Defaults to `false`. The email prompt confirms the click; the API must authorize DELETE. |
 | className | string | No | Class name for the root card |
-| sx | object | No | MUI `sx` prop for the root card (merged with defaults) |
+| sx | SxProps | No | MUI `sx` prop for the root card (merged with defaults) |
 
 ## Features
 
@@ -74,52 +77,54 @@ To override the default card layout, pass **`className`** or **`sx`** (MUI's sty
 - Responsive design
 - Material-UI components
 - TypeScript support
-- Error handling
-- Success notifications
+- Error handling with an in-card message and retry
+- Success message after username updates and account deletion
+- Optional account deletion (`allowDelete`)
 
 ## API Endpoints
 
-The component uses the following API endpoints:
+By default the component calls:
 
 - GET `/v0/user/{userId}` - Fetch user information
-- PUT `/v0/user/{userId}` - Update user information
-- DELETE `/v0/user/{userId}` - Delete user account
+- PUT `/v0/user/{userId}` - Update the username
+- DELETE `/v0/user/{userId}` - Delete the user account
 
-When `bearerToken` is provided, all requests include the Bearer token in the `Authorization` header.
+Pass `urls` to point those calls at another service. A relative path is appended to `apiUrl`. An absolute `http` or `https` URL is used as given. `{userId}` is replaced with the encoded id.
+
+```tsx
+<UserService
+  apiUrl="https://api.example.com"
+  userId="42"
+  urls={{
+    user: '/api/accounts/{userId}',
+    update: '/api/accounts/{userId}/username',
+  }}
+/>
+```
+
+`user` applies to every method that does not set its own `get`, `update`, or `delete` URL.
+
+When `bearerToken` is provided, all requests include the Bearer token in the `Authorization` header. Profile images are rendered only when `pictureUrl` is an `https` URL.
 
 ## Development
 
 ```bash
-# Install dependencies
 npm install
-
-# Build the package
+npm test
 npm run build
 ```
 
-## Local Testing
+GitHub Actions runs the same test and compile steps on pushes to `main` and `master`, and on pull requests.
 
-To test this component locally with the backend:
-
-1. **Quick Start**: See [QUICK_START.md](./QUICK_START.md) for the fastest way to get started
-2. **Detailed Guide**: See [TESTING.md](./TESTING.md) for comprehensive testing instructions
-
-### Quick Test
+## Local testing
 
 ```bash
-# 1. Start backend services
-cd ../..  # Go to project root
-docker-compose -f docker-compose.dev.yml up user-service auth-service
-
-# 2. Get a JWT token from auth-service (use Swagger UI at http://localhost:8100/swagger-ui/index.html)
-
-# 3. Start the example app
-cd user-component-react/example
+cd example
 npm install
-npm start
+npm run dev
 ```
 
-The example app will open at http://localhost:3000
+The example opens at http://localhost:3000. Set `VITE_API_URL`, `VITE_USER_ID`, and `VITE_BEARER_TOKEN` in `example/.env` when the user service is not on `http://localhost:8095`. Wrap the example in MUI's `ThemeProvider`, which `example/src/index.tsx` already does.
 
 ## License
 

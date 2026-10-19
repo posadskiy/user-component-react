@@ -1,0 +1,143 @@
+import axios from 'axios';
+import type { User, UserUrls } from './types';
+
+export interface UserRequest {
+  apiUrl: string;
+  userId: string;
+  bearerToken?: string | null;
+  signal?: AbortSignal;
+  /** Path or absolute URL. `{userId}` is encoded. Defaults to `/v0/user/{userId}`. */
+  path?: string;
+}
+
+export const defaultUserPath = '/v0/user/{userId}';
+export const requestTimeoutMs = 15_000;
+
+export function userPaths(urls?: UserUrls): { get: string; update: string; delete: string } {
+  const shared = urls?.user ?? defaultUserPath;
+  return {
+    get: urls?.get ?? shared,
+    update: urls?.update ?? shared,
+    delete: urls?.delete ?? shared,
+  };
+}
+
+export function userUrl(apiUrl: string, userId: string, path: string = defaultUserPath): string {
+  const template = path.trim();
+  if (template.includes('{userId}') && !userId) {
+    throw new Error('A userId is required for this URL.');
+  }
+  const resolved = template.split('{userId}').join(encodeURIComponent(userId));
+  if (/^[a-z][a-z\d+.-]*:/i.test(resolved)) {
+    const protocol = resolved.slice(0, resolved.indexOf(':')).toLowerCase();
+    if (protocol !== 'http' && protocol !== 'https') {
+      throw new Error('User URL must be an http(s) URL or a path.');
+    }
+    return resolved;
+  }
+  const base = apiUrl.replace(/\/$/, '');
+  return `${base}${resolved.startsWith('/') ? resolved : `/${resolved}`}`;
+}
+
+export function authHeaders(bearerToken?: string | null): Record<string, string> {
+  const token = bearerToken?.trim();
+  if (!token) return {};
+  return { Authorization: `Bearer ${token}` };
+}
+
+function jsonHeaders(bearerToken?: string | null): Record<string, string> {
+  return {
+    'Content-Type': 'application/json',
+    ...authHeaders(bearerToken),
+  };
+}
+
+function requestConfig(request: UserRequest, headers: Record<string, string>) {
+  return {
+    headers,
+    signal: request.signal,
+    timeout: requestTimeoutMs,
+  };
+}
+
+function readUser(value: unknown): User {
+  if (!isUser(value)) {
+    throw new Error('The user service returned an unexpected response.');
+  }
+  return value;
+}
+
+export async function fetchUser(request: UserRequest): Promise<User> {
+  const response = await axios.get(
+    userUrl(request.apiUrl, request.userId, request.path),
+    requestConfig(request, authHeaders(request.bearerToken)),
+  );
+  return readUser(response.data);
+}
+
+export async function updateUsername(request: UserRequest, username: string): Promise<User> {
+  const response = await axios.put(
+    userUrl(request.apiUrl, request.userId, request.path),
+    { username },
+    requestConfig(request, jsonHeaders(request.bearerToken)),
+  );
+  return readUser(response.data);
+}
+
+export async function deleteUser(request: UserRequest): Promise<void> {
+  await axios.delete(
+    userUrl(request.apiUrl, request.userId, request.path),
+    requestConfig(request, jsonHeaders(request.bearerToken)),
+  );
+}
+
+export function safePictureUrl(url?: unknown): string | undefined {
+  if (typeof url !== 'string' || !url.trim()) return undefined;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:') return undefined;
+    return parsed.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
+export function isUser(value: unknown): value is User {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Record<string, unknown>;
+  if (typeof record.username !== 'string' || typeof record.email !== 'string') return false;
+  if (record.emailVerified != null && typeof record.emailVerified !== 'boolean') return false;
+  if (record.pictureUrl != null && typeof record.pictureUrl !== 'string') return false;
+  if (record.createdVia != null && typeof record.createdVia !== 'string') return false;
+  if (record.authProviders != null && !isStringArray(record.authProviders)) return false;
+  return true;
+}
+
+function isAxiosLike(error: unknown): error is { code?: string; response?: { status?: number } } {
+  return Boolean(error && typeof error === 'object' && (error as { isAxiosError?: boolean }).isAxiosError);
+}
+
+export function toPublicError(error: unknown, fallback: string): Error {
+  if (isAxiosLike(error)) {
+    const status = error.response?.status;
+    if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
+      return new Error('The user service took too long to respond.');
+    }
+    if (status === 401 || status === 403) return new Error('You are not authorized to perform this action.');
+    if (status === 404) return new Error('User not found.');
+    if (!error.response) return new Error('Unable to reach the user service.');
+    return new Error(fallback);
+  }
+  if (error instanceof Error && error.message) return new Error(error.message);
+  return new Error(fallback);
+}
+
+export function isCanceled(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const record = error as { code?: string; name?: string };
+  return record.code === 'ERR_CANCELED' || record.name === 'CanceledError';
+}
