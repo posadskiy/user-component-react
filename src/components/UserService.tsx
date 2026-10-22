@@ -213,12 +213,9 @@ export function UserService({
 function ProfileLoading() {
   return (
     <Box
-      display="flex"
-      justifyContent="center"
-      alignItems="center"
-      minHeight="200px"
       role="status"
       aria-live="polite"
+      sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '200px' }}
     >
       <CircularProgress aria-label="Loading profile" />
     </Box>
@@ -239,7 +236,7 @@ function ProfileHeader({ user }: { user: User }) {
   const initial = user.username.trim().charAt(0).toUpperCase();
 
   return (
-    <Box display="flex" alignItems="center" mb={3}>
+    <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
       <Avatar
         src={picture && failedPicture !== picture ? picture : undefined}
         alt=""
@@ -255,7 +252,7 @@ function ProfileHeader({ user }: { user: User }) {
           {user.username}
         </Typography>
         {user.emailVerified && (
-          <Box display="flex" alignItems="center" mt={0.5}>
+          <Box sx={{ display: 'flex', alignItems: 'center', mt: 0.5 }}>
             <VerifiedUserIcon aria-hidden sx={{ fontSize: 16, mr: 0.5, color: 'success.main' }} />
             <Typography variant="caption" color="success.main">
               Email Verified
@@ -296,7 +293,7 @@ function ProfileDetails({
           <Typography variant="body1">{user.username}</Typography>
         </ProfileField>
         <ProfileField label="Email">
-          <Box display="flex" alignItems="center" gap={1}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <Typography variant="body1">{user.email}</Typography>
             {user.emailVerified && (
               <VerifiedUserIcon aria-label="Email verified" sx={{ fontSize: 18, color: 'success.main' }} />
@@ -310,7 +307,7 @@ function ProfileDetails({
         </ProfileField>
         {providers.length > 0 && (
           <ProfileField label="Auth Providers" labelSpacing={1}>
-            <Box display="flex" gap={1} flexWrap="wrap">
+            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
               {providers.map((provider) => (
                 <Chip key={provider} label={provider} size="small" variant="outlined" />
               ))}
@@ -318,7 +315,7 @@ function ProfileDetails({
           </ProfileField>
         )}
       </Grid>
-      <Box display="flex" justifyContent={allowDelete ? 'space-between' : 'flex-end'} mt={2}>
+      <Box sx={{ display: 'flex', justifyContent: allowDelete ? 'space-between' : 'flex-end', mt: 2 }}>
         {allowDelete && (
           <Button
             type="button"
@@ -358,8 +355,8 @@ function ProfileField({
   labelSpacing?: number;
 }) {
   return (
-    <Grid item xs={12}>
-      <Typography variant="subtitle1" color="text.secondary" mb={labelSpacing}>
+    <Grid size={12}>
+      <Typography variant="subtitle1" color="text.secondary" sx={{ mb: labelSpacing }}>
         {label}
       </Typography>
       {children}
@@ -407,7 +404,7 @@ function UsernameForm({
   return (
     <form action={submit}>
       <Grid container spacing={2}>
-        <Grid item xs={12}>
+        <Grid size={12}>
           {result.error && (
             <Alert severity="error" sx={{ mb: 2 }}>
               {result.error}
@@ -425,8 +422,8 @@ function UsernameForm({
             autoComplete="username"
           />
         </Grid>
-        <Grid item xs={12}>
-          <Box display="flex" justifyContent="flex-end" gap={1}>
+        <Grid size={12}>
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
             <Button type="button" variant="outlined" disabled={pending} onClick={onCancel}>
               Cancel
             </Button>
