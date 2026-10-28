@@ -11,13 +11,13 @@ export interface UserRequest {
 }
 
 export const defaultUserPath = '/v0/user/{userId}';
+export const defaultVerificationEmailPath = '/account/verification-email';
 export const requestTimeoutMs = 15_000;
 
-export function userPaths(urls?: UserUrls): { get: string; update: string; delete: string } {
+export function userPaths(urls?: UserUrls): { get: string; delete: string } {
   const shared = urls?.user ?? defaultUserPath;
   return {
     get: urls?.get ?? shared,
-    update: urls?.update ?? shared,
     delete: urls?.delete ?? shared,
   };
 }
@@ -75,18 +75,42 @@ export async function fetchUser(request: UserRequest): Promise<User> {
   return readUser(response.data);
 }
 
-export async function updateUsername(request: UserRequest, username: string): Promise<User> {
-  const response = await axios.put(
-    userUrl(request.apiUrl, request.userId, request.path),
-    { username },
-    requestConfig(request, jsonHeaders(request.bearerToken)),
-  );
-  return readUser(response.data);
-}
-
 export async function deleteUser(request: UserRequest): Promise<void> {
   await axios.delete(
     userUrl(request.apiUrl, request.userId, request.path),
+    requestConfig(request, jsonHeaders(request.bearerToken)),
+  );
+}
+
+/**
+ * Origin placed in a confirmation link. Paths, queries, and custom schemes are not sent.
+ * `https://grammarbar.com/verify-email?token=1` becomes `https://grammarbar.com`.
+ * `http` is kept only for localhost.
+ */
+export function siteOrigin(value: string): string {
+  const trimmed = value.trim();
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error('Use an https address for the confirmation link.');
+  }
+  if (parsed.username || parsed.password || !parsed.host) {
+    throw new Error('Use an https address for the confirmation link.');
+  }
+  const protocol = parsed.protocol.toLowerCase();
+  const host = parsed.hostname.toLowerCase();
+  const loopback = host === 'localhost' || host === '127.0.0.1' || host === '::1';
+  if (protocol === 'https:' || (protocol === 'http:' && loopback)) {
+    return parsed.origin;
+  }
+  throw new Error('Use an https address for the confirmation link.');
+}
+
+export async function resendVerificationEmail(request: UserRequest, linkOrigin: string): Promise<void> {
+  await axios.post(
+    userUrl(request.apiUrl, request.userId, request.path ?? defaultVerificationEmailPath),
+    { linkOrigin: siteOrigin(linkOrigin) },
     requestConfig(request, jsonHeaders(request.bearerToken)),
   );
 }
@@ -109,7 +133,7 @@ function isStringArray(value: unknown): value is string[] {
 export function isUser(value: unknown): value is User {
   if (!value || typeof value !== 'object') return false;
   const record = value as Record<string, unknown>;
-  if (typeof record.username !== 'string' || typeof record.email !== 'string') return false;
+  if (typeof record.email !== 'string') return false;
   if (record.emailVerified != null && typeof record.emailVerified !== 'boolean') return false;
   if (record.pictureUrl != null && typeof record.pictureUrl !== 'string') return false;
   if (record.createdVia != null && typeof record.createdVia !== 'string') return false;
@@ -129,6 +153,7 @@ export function toPublicError(error: unknown, fallback: string): Error {
     }
     if (status === 401 || status === 403) return new Error('You are not authorized to perform this action.');
     if (status === 404) return new Error('User not found.');
+    if (status === 429) return new Error('Too many attempts. Wait a minute and try again.');
     if (!error.response) return new Error('Unable to reach the user service.');
     return new Error(fallback);
   }

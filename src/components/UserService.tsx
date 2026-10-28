@@ -13,35 +13,76 @@ import {
   DialogContent,
   DialogContentText,
   DialogTitle,
-  Grid,
+  Divider,
+  Stack,
   TextField,
   Typography,
   type SxProps,
   type Theme,
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
-import EditIcon from '@mui/icons-material/Edit';
-import SaveIcon from '@mui/icons-material/Save';
-import VerifiedUserIcon from '@mui/icons-material/VerifiedUser';
+import MarkEmailUnreadIcon from '@mui/icons-material/MarkEmailUnread';
 import {
+  defaultVerificationEmailPath,
   deleteUser,
   fetchUser,
   isCanceled,
+  resendVerificationEmail,
   safePictureUrl,
   toPublicError,
-  updateUsername,
   userPaths,
   type UserRequest,
 } from '../api';
 import type { User, UserServiceProps } from '../types';
 
-const defaultCardSx = { maxWidth: 600, margin: '0 auto', mt: 4 };
-const UPDATED_MESSAGE = 'Username updated successfully';
+const defaultCardSx = {
+  maxWidth: 560,
+  width: { xs: 'calc(100% - 32px)', sm: '100%' },
+  mx: 'auto',
+  mt: 4,
+};
 const DELETED_MESSAGE = 'Your account has been deleted successfully';
+const VERIFICATION_SENT_MESSAGE = 'Confirmation email sent.';
+const verificationCooldownMs = 2 * 60 * 1000;
+
+function verificationCooldownKey(userId: string): string {
+  return `user-component-react:verification-email:${userId}`;
+}
+
+function readVerificationCooldown(userId: string): number {
+  try {
+    const until = Number(localStorage.getItem(verificationCooldownKey(userId)));
+    return Number.isFinite(until) && until > Date.now() ? until : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeVerificationCooldown(userId: string, until: number): void {
+  try {
+    localStorage.setItem(verificationCooldownKey(userId), String(until));
+  } catch {
+    // The timer on this page still applies when storage is unavailable.
+  }
+}
+
+function clearVerificationCooldown(userId: string): void {
+  try {
+    localStorage.removeItem(verificationCooldownKey(userId));
+  } catch {
+    // Storage can be unavailable in a private browser.
+  }
+}
+
+function cooldownLabel(remainingMs: number): string {
+  const totalSeconds = Math.max(1, Math.ceil(remainingMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `Resend in ${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
 
 type UserEndpoint = Pick<UserServiceProps, 'apiUrl' | 'userId' | 'bearerToken'> & {
   getPath: string;
-  updatePath: string;
   deletePath: string;
 };
 
@@ -49,13 +90,14 @@ type ProfileView =
   | { status: 'loading' }
   | { status: 'error'; message: string }
   | { status: 'deleted'; message: string }
-  | { status: 'ready'; user: User; notice: string | null; editing: boolean };
+  | { status: 'ready'; user: User };
 
 interface ActionMessage {
   error: string | null;
+  sent: boolean;
 }
 
-const emptyMessage: ActionMessage = { error: null };
+const emptyMessage: ActionMessage = { error: null, sent: false };
 
 function requestOf(endpoint: UserEndpoint, signal: AbortSignal | null, path: string): UserRequest {
   return {
@@ -65,6 +107,17 @@ function requestOf(endpoint: UserEndpoint, signal: AbortSignal | null, path: str
     path,
     signal: signal ?? undefined,
   };
+}
+
+function displayLabel(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+}
+
+function emailInitial(email: string): string {
+  const initial = email.trim().charAt(0).toUpperCase();
+  return initial || '?';
 }
 
 function useUserProfile({
@@ -94,7 +147,7 @@ function useUserProfile({
       try {
         const user = await fetchUser({ apiUrl, userId, bearerToken, path: getPath, signal: controller.signal });
         if (ignore) return;
-        setView({ status: 'ready', user, notice: null, editing: false });
+        setView({ status: 'ready', user });
       } catch (error) {
         if (ignore || isCanceled(error)) return;
         const publicError = reportError(error, 'Unable to load the profile.');
@@ -116,6 +169,8 @@ export function UserService({
   apiUrl,
   userId,
   bearerToken,
+  authApiUrl,
+  linkOrigin,
   urls,
   onError,
   onSuccess,
@@ -129,7 +184,6 @@ export function UserService({
     userId,
     bearerToken,
     getPath: paths.get,
-    updatePath: paths.update,
     deletePath: paths.delete,
     onError,
   });
@@ -138,7 +192,6 @@ export function UserService({
     userId,
     bearerToken,
     getPath: paths.get,
-    updatePath: paths.update,
     deletePath: paths.delete,
   };
   const cardSx = (sx ? [defaultCardSx, sx] : defaultCardSx) as SxProps<Theme>;
@@ -168,43 +221,36 @@ export function UserService({
     );
   }
 
-  const { user, notice, editing } = view;
+  const { user } = view;
+  const showResend = user.emailVerified === false;
+  const showActions = allowDelete || showResend;
+  const showFacts = hasProfileFacts(user);
 
   return (
     <Card className={className} sx={cardSx}>
       <CardContent>
-        <ProfileHeader user={user} />
-        {notice && (
-          <Alert severity="success" sx={{ mb: 2 }}>
-            {notice}
-          </Alert>
-        )}
-        {editing ? (
-          <UsernameForm
-            endpoint={endpoint}
-            signalRef={signalRef}
-            initialUsername={user.username}
-            onCancel={() => setView({ ...view, editing: false })}
-            onUpdated={(nextUser) => {
-              setView({ status: 'ready', user: nextUser, notice: UPDATED_MESSAGE, editing: false });
-              onSuccess?.(UPDATED_MESSAGE);
-            }}
-            onError={onError}
-          />
-        ) : (
-          <ProfileDetails
-            user={user}
-            allowDelete={allowDelete}
-            endpoint={endpoint}
-            signalRef={signalRef}
-            onEdit={() => setView({ ...view, editing: true, notice: null })}
-            onDeleted={() => {
-              setView({ status: 'deleted', message: DELETED_MESSAGE });
-              onSuccess?.(DELETED_MESSAGE);
-            }}
-            onError={onError}
-          />
-        )}
+        <Stack spacing={2.5} divider={showFacts || showActions ? <Divider /> : undefined}>
+          <ProfileHeader user={user} />
+          {showFacts && <ProfileFacts user={user} />}
+          {showActions && (
+            <AccountActions
+              user={user}
+              allowDelete={allowDelete}
+              showResend={showResend}
+              endpoint={endpoint}
+              signalRef={signalRef}
+              authApiUrl={authApiUrl ?? apiUrl}
+              verificationPath={urls?.verificationEmail ?? defaultVerificationEmailPath}
+              linkOrigin={linkOrigin}
+              onDeleted={() => {
+                setView({ status: 'deleted', message: DELETED_MESSAGE });
+                onSuccess?.(DELETED_MESSAGE);
+              }}
+              onSent={() => onSuccess?.(VERIFICATION_SENT_MESSAGE)}
+              onError={onError}
+            />
+          )}
+        </Stack>
       </CardContent>
     </Card>
   );
@@ -233,89 +279,166 @@ function StatusCard({ className, sx, children }: { className?: string; sx: SxPro
 function ProfileHeader({ user }: { user: User }) {
   const picture = safePictureUrl(user.pictureUrl);
   const [failedPicture, setFailedPicture] = useState<string | null>(null);
-  const initial = user.username.trim().charAt(0).toUpperCase();
+  const verified = user.emailVerified === true;
+  const unverified = user.emailVerified === false;
 
   return (
-    <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
       <Avatar
         src={picture && failedPicture !== picture ? picture : undefined}
         alt=""
         onError={() => {
           if (picture) setFailedPicture(picture);
         }}
-        sx={{ width: 64, height: 64, mr: 2 }}
+        sx={{ width: 56, height: 56, flexShrink: 0 }}
       >
-        {initial}
+        {emailInitial(user.email)}
       </Avatar>
-      <Box>
-        <Typography variant="h5" component="h2">
-          {user.username}
+      <Box sx={{ minWidth: 0 }}>
+        <Typography variant="h6" component="h2" sx={{ overflowWrap: 'anywhere', lineHeight: 1.3 }}>
+          {user.email}
         </Typography>
-        {user.emailVerified && (
-          <Box sx={{ display: 'flex', alignItems: 'center', mt: 0.5 }}>
-            <VerifiedUserIcon aria-hidden sx={{ fontSize: 16, mr: 0.5, color: 'success.main' }} />
-            <Typography variant="caption" color="success.main">
-              Email Verified
-            </Typography>
-          </Box>
+        {(verified || unverified) && (
+          <Chip
+            size="small"
+            variant="outlined"
+            color={verified ? 'success' : 'warning'}
+            label={verified ? 'Verified' : 'Not verified'}
+            sx={{ mt: 1 }}
+          />
         )}
       </Box>
     </Box>
   );
 }
 
-function ProfileDetails({
+function profileProviders(user: User): string[] {
+  if (!Array.isArray(user.authProviders)) return [];
+  return user.authProviders.filter((provider) => typeof provider === 'string' && provider.trim());
+}
+
+function hasProfileFacts(user: User): boolean {
+  const createdVia = typeof user.createdVia === 'string' ? user.createdVia.trim() : '';
+  return createdVia.length > 0 || profileProviders(user).length > 0;
+}
+
+function ProfileFacts({ user }: { user: User }) {
+  const createdVia = typeof user.createdVia === 'string' ? displayLabel(user.createdVia) : '';
+  const providers = profileProviders(user);
+
+  return (
+    <Stack spacing={2}>
+      {createdVia && (
+        <Fact label="Signed up">
+          <Typography variant="body1">{createdVia}</Typography>
+        </Fact>
+      )}
+      {providers.length > 0 && (
+        <Fact label="Sign-in methods">
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+            {providers.map((provider) => (
+              <Chip key={provider} label={displayLabel(provider)} size="small" variant="outlined" />
+            ))}
+          </Box>
+        </Fact>
+      )}
+    </Stack>
+  );
+}
+
+function Fact({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <Box>
+      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+        {label}
+      </Typography>
+      {children}
+    </Box>
+  );
+}
+
+function AccountActions({
   user,
   allowDelete,
+  showResend,
   endpoint,
   signalRef,
-  onEdit,
+  authApiUrl,
+  verificationPath,
+  linkOrigin,
   onDeleted,
+  onSent,
   onError,
 }: {
   user: User;
   allowDelete: boolean;
+  showResend: boolean;
   endpoint: UserEndpoint;
   signalRef: RefObject<AbortSignal | null>;
-  onEdit: () => void;
+  authApiUrl: string;
+  verificationPath: string;
+  linkOrigin?: string;
   onDeleted: () => void;
+  onSent: () => void;
   onError?: (error: Error) => void;
 }) {
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const providers = Array.isArray(user.authProviders)
-    ? user.authProviders.filter((provider) => typeof provider === 'string')
-    : [];
+  const [cooldownUntil, setCooldownUntil] = useState(() => readVerificationCooldown(endpoint.userId));
+  const [now, setNow] = useState(() => Date.now());
+  const remainingMs = Math.max(0, cooldownUntil - now);
+
+  useEffect(() => {
+    if (cooldownUntil <= Date.now()) return undefined;
+    const id = window.setInterval(() => {
+      const next = Date.now();
+      if (next >= cooldownUntil) {
+        window.clearInterval(id);
+        clearVerificationCooldown(endpoint.userId);
+        setCooldownUntil(0);
+        setNow(next);
+        return;
+      }
+      setNow(next);
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [cooldownUntil, endpoint.userId]);
+
+  const [resend, submitResend, resendPending] = useActionState(
+    async (previous: ActionMessage): Promise<ActionMessage> => {
+      const signal = signalRef.current;
+      try {
+        await resendVerificationEmail(
+          {
+            apiUrl: authApiUrl,
+            userId: endpoint.userId,
+            bearerToken: endpoint.bearerToken,
+            path: verificationPath,
+            signal: signal ?? undefined,
+          },
+          linkOrigin ?? window.location.origin,
+        );
+        if (signal?.aborted) return previous;
+        const until = Date.now() + verificationCooldownMs;
+        writeVerificationCooldown(endpoint.userId, until);
+        setCooldownUntil(until);
+        setNow(Date.now());
+        onSent();
+        return { error: null, sent: true };
+      } catch (error) {
+        if (isCanceled(error) || signal?.aborted) return previous;
+        const publicError = toPublicError(error, 'Unable to send the confirmation email.');
+        onError?.(publicError);
+        return { error: publicError.message, sent: false };
+      }
+    },
+    emptyMessage,
+  );
 
   return (
-    <>
-      <Grid container spacing={2}>
-        <ProfileField label="Username">
-          <Typography variant="body1">{user.username}</Typography>
-        </ProfileField>
-        <ProfileField label="Email">
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Typography variant="body1">{user.email}</Typography>
-            {user.emailVerified && (
-              <VerifiedUserIcon aria-label="Email verified" sx={{ fontSize: 18, color: 'success.main' }} />
-            )}
-          </Box>
-        </ProfileField>
-        <ProfileField label="Created Via">
-          <Typography variant="body1" sx={{ textTransform: 'capitalize' }}>
-            {typeof user.createdVia === 'string' ? user.createdVia : ''}
-          </Typography>
-        </ProfileField>
-        {providers.length > 0 && (
-          <ProfileField label="Auth Providers" labelSpacing={1}>
-            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-              {providers.map((provider) => (
-                <Chip key={provider} label={provider} size="small" variant="outlined" />
-              ))}
-            </Box>
-          </ProfileField>
-        )}
-      </Grid>
-      <Box sx={{ display: 'flex', justifyContent: allowDelete ? 'space-between' : 'flex-end', mt: 2 }}>
+    <Stack spacing={2}>
+      {resend.sent && <Alert severity="success">{VERIFICATION_SENT_MESSAGE}</Alert>}
+      {resend.error && <Alert severity="error">{resend.error}</Alert>}
+      <Box sx={{ display: 'flex', justifyContent: 'flex-start', gap: 1, flexWrap: 'wrap' }}>
         {allowDelete && (
           <Button
             type="button"
@@ -324,12 +447,21 @@ function ProfileDetails({
             startIcon={<DeleteIcon />}
             onClick={() => setDeleteOpen(true)}
           >
-            Delete Profile
+            Delete account
           </Button>
         )}
-        <Button type="button" variant="contained" startIcon={<EditIcon />} onClick={onEdit}>
-          Edit Username
-        </Button>
+        {showResend && (
+          <Box component="form" action={submitResend}>
+            <Button
+              type="submit"
+              variant="outlined"
+              startIcon={resendPending ? <CircularProgress size={16} color="inherit" /> : <MarkEmailUnreadIcon />}
+              disabled={resendPending || remainingMs > 0}
+            >
+              {resendPending ? 'Sending...' : remainingMs > 0 ? cooldownLabel(remainingMs) : 'Resend confirmation email'}
+            </Button>
+          </Box>
+        )}
       </Box>
       {allowDelete && deleteOpen && (
         <DeleteProfileForm
@@ -341,99 +473,7 @@ function ProfileDetails({
           onError={onError}
         />
       )}
-    </>
-  );
-}
-
-function ProfileField({
-  label,
-  children,
-  labelSpacing = 0,
-}: {
-  label: string;
-  children: ReactNode;
-  labelSpacing?: number;
-}) {
-  return (
-    <Grid size={12}>
-      <Typography variant="subtitle1" color="text.secondary" sx={{ mb: labelSpacing }}>
-        {label}
-      </Typography>
-      {children}
-    </Grid>
-  );
-}
-
-function UsernameForm({
-  endpoint,
-  signalRef,
-  initialUsername,
-  onCancel,
-  onUpdated,
-  onError,
-}: {
-  endpoint: UserEndpoint;
-  signalRef: RefObject<AbortSignal | null>;
-  initialUsername: string;
-  onCancel: () => void;
-  onUpdated: (user: User) => void;
-  onError?: (error: Error) => void;
-}) {
-  const [username, setUsername] = useState(initialUsername);
-  const [result, submit, pending] = useActionState(
-    async (_previous: ActionMessage, formData: FormData): Promise<ActionMessage> => {
-      const nextUsername = String(formData.get('username') ?? '').trim();
-      if (!nextUsername) return { error: 'Username is required.' };
-
-      const signal = signalRef.current;
-      try {
-        const nextUser = await updateUsername(requestOf(endpoint, signal, endpoint.updatePath), nextUsername);
-        if (signal?.aborted) return emptyMessage;
-        onUpdated(nextUser);
-        return emptyMessage;
-      } catch (error) {
-        if (isCanceled(error) || signal?.aborted) return emptyMessage;
-        const publicError = toPublicError(error, 'Unable to update the username.');
-        onError?.(publicError);
-        return { error: publicError.message };
-      }
-    },
-    emptyMessage,
-  );
-
-  return (
-    <form action={submit}>
-      <Grid container spacing={2}>
-        <Grid size={12}>
-          {result.error && (
-            <Alert severity="error" sx={{ mb: 2 }}>
-              {result.error}
-            </Alert>
-          )}
-          <TextField
-            fullWidth
-            label="Username"
-            name="username"
-            value={username}
-            onChange={(event) => setUsername(event.target.value)}
-            required
-            disabled={pending}
-            error={Boolean(result.error)}
-            autoComplete="username"
-          />
-        </Grid>
-        <Grid size={12}>
-          <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
-            <Button type="button" variant="outlined" disabled={pending} onClick={onCancel}>
-              Cancel
-            </Button>
-            <Button type="submit" variant="contained" startIcon={<SaveIcon />} disabled={pending}>
-              {pending ? 'Saving...' : 'Save'}
-            </Button>
-          </Box>
-        </Grid>
-      </Grid>
-    </form>
+    </Stack>
   );
 }
 
@@ -499,13 +539,10 @@ function DeleteProfileForm({
       aria-describedby={descriptionId}
     >
       <form action={submit}>
-        <DialogTitle id={titleId}>Delete Profile</DialogTitle>
+        <DialogTitle id={titleId}>Delete account</DialogTitle>
         <DialogContent>
           <DialogContentText id={descriptionId}>
-            This action cannot be undone. This will permanently delete your account and all associated data.
-            <br />
-            <br />
-            To confirm, please enter your email address: <strong>{user.email}</strong>
+            This permanently deletes the account and its data. Enter <strong>{user.email}</strong> to confirm.
           </DialogContentText>
           {deleteError && (
             <Alert severity="error" sx={{ mt: 2 }}>
@@ -515,7 +552,7 @@ function DeleteProfileForm({
           <TextField
             autoFocus
             margin="dense"
-            label="Email Address"
+            label="Email"
             type="email"
             name="email"
             fullWidth
@@ -540,7 +577,7 @@ function DeleteProfileForm({
             disabled={pending || email.trim().length === 0}
             startIcon={pending ? <CircularProgress size={16} color="inherit" /> : <DeleteIcon />}
           >
-            {pending ? 'Deleting...' : 'Delete Profile'}
+            {pending ? 'Deleting...' : 'Delete account'}
           </Button>
         </DialogActions>
       </form>

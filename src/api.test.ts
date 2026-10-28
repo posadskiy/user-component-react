@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { authHeaders, isUser, requestTimeoutMs, safePictureUrl, toPublicError, userPaths, userUrl } from './api';
+import { authHeaders, isUser, requestTimeoutMs, safePictureUrl, siteOrigin, toPublicError, userPaths, userUrl } from './api';
 
 describe('user request helpers', () => {
   it('encodes the user id and strips a trailing slash from the api url', () => {
@@ -16,10 +16,9 @@ describe('user request helpers', () => {
       'https://accounts.example/people/ada',
     );
     expect(userUrl('http://localhost:8095/', 'ada', '/users/me')).toBe('http://localhost:8095/users/me');
-    expect(userPaths({ user: '/accounts/{userId}', update: '/accounts/{userId}/name' })).toEqual({
+    expect(userPaths({ user: '/accounts/{userId}', delete: '/accounts/{userId}/close' })).toEqual({
       get: '/accounts/{userId}',
-      update: '/accounts/{userId}/name',
-      delete: '/accounts/{userId}',
+      delete: '/accounts/{userId}/close',
     });
     expect(() => userUrl('http://localhost:8095/', 'ada', 'javascript:alert(1)')).toThrow(
       'User URL must be an http(s) URL or a path.',
@@ -31,6 +30,18 @@ describe('user request helpers', () => {
     expect(authHeaders('   ')).toEqual({});
     expect(authHeaders(null)).toEqual({});
     expect(authHeaders(undefined)).toEqual({});
+  });
+
+  it('sends a site origin and drops a path, query, or custom scheme', () => {
+    expect(siteOrigin('https://grammarbar.com/verify-email?token=abc#mail')).toBe('https://grammarbar.com');
+    expect(siteOrigin('https://grammarbar.com/')).toBe('https://grammarbar.com');
+    expect(siteOrigin('http://localhost:3000/account')).toBe('http://localhost:3000');
+    expect(siteOrigin('http://127.0.0.1:3000')).toBe('http://127.0.0.1:3000');
+    expect(() => siteOrigin('grammarbar://auth')).toThrow('Use an https address for the confirmation link.');
+    expect(() => siteOrigin('http://grammarbar.com')).toThrow('Use an https address for the confirmation link.');
+    expect(() => siteOrigin('https://user:pass@grammarbar.com')).toThrow(
+      'Use an https address for the confirmation link.',
+    );
   });
 
   it('allows only https picture urls', () => {
@@ -58,15 +69,15 @@ describe('user request helpers', () => {
     expect(error.message).not.toContain('password');
   });
 
-  it('accepts a user payload with username and email', () => {
-    expect(isUser({ username: 'ada', email: 'ada@example.com' })).toBe(true);
-    expect(isUser({ username: 'ada', email: 'ada@example.com', pictureUrl: null, createdVia: null })).toBe(true);
-    expect(isUser({ username: 'ada', email: 'ada@example.com', authProviders: ['google'] })).toBe(true);
+  it('accepts a user payload with an email', () => {
+    expect(isUser({ email: 'ada@example.com' })).toBe(true);
+    expect(isUser({ email: 'ada@example.com', pictureUrl: null, createdVia: null })).toBe(true);
+    expect(isUser({ email: 'ada@example.com', authProviders: ['google'] })).toBe(true);
     expect(isUser({ username: 'ada' })).toBe(false);
     expect(isUser('<html>')).toBe(false);
-    expect(isUser({ username: 'ada', email: 'ada@example.com', createdVia: { source: 'local' } })).toBe(false);
-    expect(isUser({ username: 'ada', email: 'ada@example.com', authProviders: ['google', { name: 'x' }] })).toBe(false);
-    expect(isUser({ username: 'ada', email: 'ada@example.com', pictureUrl: { url: 'https://cdn.example/a.png' } })).toBe(false);
+    expect(isUser({ email: 'ada@example.com', createdVia: { source: 'local' } })).toBe(false);
+    expect(isUser({ email: 'ada@example.com', authProviders: ['google', { name: 'x' }] })).toBe(false);
+    expect(isUser({ email: 'ada@example.com', pictureUrl: { url: 'https://cdn.example/a.png' } })).toBe(false);
   });
 
   it('replaces a timeout with a message that does not include the limit', () => {
@@ -77,5 +88,15 @@ describe('user request helpers', () => {
 
     expect(error.message).toBe('The user service took too long to respond.');
     expect(error.message).not.toContain(String(requestTimeoutMs));
+  });
+
+  it('replaces a rate limit with a message that omits the response body', () => {
+    const error = toPublicError(
+      { isAxiosError: true, response: { status: 429, data: { detail: 'slow down token=secret' } } },
+      'Unable to send the confirmation email.',
+    );
+
+    expect(error.message).toBe('Too many attempts. Wait a minute and try again.');
+    expect(error.message).not.toContain('secret');
   });
 });

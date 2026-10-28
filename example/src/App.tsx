@@ -9,16 +9,18 @@ function App() {
     console.log('Success:', message);
   };
 
-  // For local testing: set VITE_BEARER_TOKEN, VITE_API_URL, VITE_USER_ID in .env
-  // or ensure user-service is running on localhost:8095 and get a JWT from auth-service
+  // For local testing: set VITE_BEARER_TOKEN, VITE_API_URL, VITE_USER_ID, VITE_AUTH_API_URL in .env
+  // or ensure user-service is running on localhost:8095 and auth-service on localhost:8100
   const bearerToken = import.meta.env.VITE_BEARER_TOKEN || undefined;
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8095';
+  const authApiUrl = import.meta.env.VITE_AUTH_API_URL || undefined;
   const userId = import.meta.env.VITE_USER_ID || 'me';
 
   return (
     <div className="App">
       <UserService
         apiUrl={apiUrl}
+        authApiUrl={authApiUrl}
         userId={userId}
         bearerToken={bearerToken}
         onError={handleError}

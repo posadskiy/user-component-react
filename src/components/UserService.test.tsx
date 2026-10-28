@@ -1,16 +1,16 @@
 import type { ComponentProps } from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { requestTimeoutMs } from '../api';
 import { UserService } from './UserService';
 
-const { get, put, remove } = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn(), remove: vi.fn() }));
+const { get, post, remove } = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), remove: vi.fn() }));
 
 vi.mock('axios', () => ({
   default: {
     get,
-    put,
+    post,
     delete: remove,
     isAxiosError: (error: unknown) =>
       Boolean(error && typeof error === 'object' && (error as { isAxiosError?: boolean }).isAxiosError),
@@ -19,7 +19,6 @@ vi.mock('axios', () => ({
 
 const profile = {
   id: 1,
-  username: 'ada',
   email: 'ada@example.com',
   emailVerified: true,
   pictureUrl: 'http://cdn.example/a.png',
@@ -35,8 +34,9 @@ function renderProfile(props: Partial<ComponentProps<typeof UserService>> = {}) 
 
 describe('UserService', () => {
   beforeEach(() => {
+    localStorage.clear();
     get.mockReset();
-    put.mockReset();
+    post.mockReset();
     remove.mockReset();
   });
 
@@ -44,7 +44,7 @@ describe('UserService', () => {
     get.mockResolvedValue({ data: profile });
     renderProfile();
 
-    expect(await screen.findByRole('heading', { name: 'ada' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'ada@example.com' })).toBeInTheDocument();
     expect(get).toHaveBeenCalledWith(
       'http://localhost:8095/v0/user/me%2F..%2Fother',
       expect.objectContaining({
@@ -54,7 +54,8 @@ describe('UserService', () => {
       }),
     );
     expect(document.querySelector('img')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Delete Profile' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Delete account' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Resend confirmation email' })).not.toBeInTheDocument();
   });
 
   it('shows the load error and hides profile actions', async () => {
@@ -68,44 +69,25 @@ describe('UserService', () => {
     renderProfile({ onError });
 
     expect(await screen.findByText('Unable to load the profile.')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Delete Profile' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Edit Username' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Delete account' })).not.toBeInTheDocument();
+    expect(screen.queryByText('ada')).not.toBeInTheDocument();
     expect(onError).toHaveBeenCalledWith(expect.any(Error));
     expect(onError.mock.calls[0][0].message).toBe('Unable to load the profile.');
     expect(JSON.stringify(onError.mock.calls[0][0])).not.toContain('super-secret');
   });
 
-  it('hides deletion when allowDelete is false and disables save while the update is in flight', async () => {
-    const user = userEvent.setup();
+  it('shows an https picture and keeps a verified account free of account actions', async () => {
     get.mockResolvedValue({ data: { ...profile, pictureUrl: 'https://cdn.example/a.png' } });
-    let resolvePut: (value: unknown) => void = () => undefined;
-    put.mockReturnValue(new Promise((resolve) => {
-      resolvePut = resolve;
-    }));
     renderProfile({ allowDelete: false });
 
-    expect(await screen.findByRole('heading', { name: 'ada' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'ada@example.com' })).toBeInTheDocument();
+    expect(screen.getByText('Verified')).toBeInTheDocument();
+    expect(screen.getByText('Local')).toBeInTheDocument();
+    expect(screen.getByText('Google')).toBeInTheDocument();
     expect(document.querySelector('img')).toHaveAttribute('src', 'https://cdn.example/a.png');
-    expect(screen.queryByRole('button', { name: 'Delete Profile' })).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'Edit Username' }));
-    const submitted = user.click(screen.getByRole('button', { name: 'Save' }));
-    expect(await screen.findByRole('button', { name: 'Saving...' })).toBeDisabled();
-    resolvePut({ data: { ...profile, username: 'ada', pictureUrl: 'https://cdn.example/a.png' } });
-    await submitted;
-    expect(await screen.findByText('Username updated successfully')).toBeInTheDocument();
-    expect(put).toHaveBeenCalledWith(
-      'http://localhost:8095/v0/user/me%2F..%2Fother',
-      { username: 'ada' },
-      expect.objectContaining({
-        headers: {
-          Authorization: 'Bearer super-secret',
-          'Content-Type': 'application/json',
-        },
-        signal: expect.any(AbortSignal),
-        timeout: requestTimeoutMs,
-      }),
-    );
+    expect(screen.queryByRole('button', { name: 'Delete account' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Resend confirmation email' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/username/i)).not.toBeInTheDocument();
   });
 
   it('shows a load error when the profile payload is not safe to render', async () => {
@@ -116,42 +98,26 @@ describe('UserService', () => {
     renderProfile({ onError });
 
     expect(await screen.findByText('The user service returned an unexpected response.')).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'ada' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'ada@example.com' })).not.toBeInTheDocument();
     expect(onError).toHaveBeenCalledWith(expect.any(Error));
     expect(onError.mock.calls[0][0].message).toBe('The user service returned an unexpected response.');
   });
 
-  it('loads and updates the profile at caller-supplied urls', async () => {
-    const user = userEvent.setup();
+  it('loads the profile at a caller-supplied url', async () => {
     get.mockResolvedValue({ data: profile });
-    put.mockResolvedValue({ data: { ...profile, username: 'ada' } });
     renderProfile({
       urls: {
         get: '/api/people/{userId}',
-        update: 'https://accounts.example/people/{userId}',
         delete: '/api/people/{userId}',
       },
     });
 
-    expect(await screen.findByRole('heading', { name: 'ada' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'ada@example.com' })).toBeInTheDocument();
     expect(get).toHaveBeenCalledWith(
       'http://localhost:8095/api/people/me%2F..%2Fother',
       expect.objectContaining({
         headers: { Authorization: 'Bearer super-secret' },
         signal: expect.any(AbortSignal),
-      }),
-    );
-
-    await user.click(screen.getByRole('button', { name: 'Edit Username' }));
-    await user.click(screen.getByRole('button', { name: 'Save' }));
-    expect(put).toHaveBeenCalledWith(
-      'https://accounts.example/people/me%2F..%2Fother',
-      { username: 'ada' },
-      expect.objectContaining({
-        headers: {
-          Authorization: 'Bearer super-secret',
-          'Content-Type': 'application/json',
-        },
       }),
     );
   });
@@ -163,23 +129,93 @@ describe('UserService', () => {
     renderProfile();
 
     await user.click(await screen.findByRole('button', { name: 'Retry' }));
-    expect(await screen.findByRole('heading', { name: 'ada' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'ada@example.com' })).toBeInTheDocument();
     expect(get).toHaveBeenCalledTimes(2);
   });
 
-  it('requires a non-blank username', async () => {
+  it('resends the confirmation email for an unverified account', async () => {
     const user = userEvent.setup();
-    get.mockResolvedValue({ data: profile });
-    renderProfile();
+    const onSuccess = vi.fn();
+    get.mockResolvedValue({ data: { ...profile, emailVerified: false } });
+    post.mockResolvedValue({ status: 204 });
+    renderProfile({
+      authApiUrl: 'http://localhost:8100/',
+      linkOrigin: 'https://grammarbar.com/verify-email?token=abc',
+      onSuccess,
+    });
 
-    await user.click(await screen.findByRole('button', { name: 'Edit Username' }));
-    const field = screen.getByRole('textbox', { name: 'Username' });
-    await user.clear(field);
-    await user.type(field, '   ');
-    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByText('Not verified')).toBeInTheDocument();
+    expect(screen.queryByText(/username/i)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Resend confirmation email' }));
 
-    expect(await screen.findByText('Username is required.')).toBeInTheDocument();
-    expect(put).not.toHaveBeenCalled();
+    expect(await screen.findByText('Confirmation email sent.')).toBeInTheDocument();
+    expect(onSuccess).toHaveBeenCalledWith('Confirmation email sent.');
+    expect(post).toHaveBeenCalledWith(
+      'http://localhost:8100/account/verification-email',
+      { linkOrigin: 'https://grammarbar.com' },
+      expect.objectContaining({
+        headers: {
+          Authorization: 'Bearer super-secret',
+          'Content-Type': 'application/json',
+        },
+        signal: expect.any(AbortSignal),
+        timeout: requestTimeoutMs,
+      }),
+    );
+  });
+
+  it('keeps a custom scheme out of the confirmation request', async () => {
+    const user = userEvent.setup();
+    get.mockResolvedValue({ data: { ...profile, emailVerified: false } });
+    renderProfile({ linkOrigin: 'grammarbar://auth' });
+
+    await user.click(await screen.findByRole('button', { name: 'Resend confirmation email' }));
+    expect(await screen.findByText('Use an https address for the confirmation link.')).toBeInTheDocument();
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('waits two minutes before another confirmation email can be sent', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval'] });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    get.mockResolvedValue({ data: { ...profile, emailVerified: false } });
+    post.mockResolvedValue({ status: 204 });
+    renderProfile({ linkOrigin: 'https://grammarbar.com' });
+
+    try {
+      await user.click(await screen.findByRole('button', { name: 'Resend confirmation email' }));
+      expect(await screen.findByRole('button', { name: 'Resend in 2:00' })).toBeDisabled();
+      expect(post).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(119_000);
+      expect(screen.getByRole('button', { name: 'Resend in 0:01' })).toBeDisabled();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(screen.getByRole('button', { name: 'Resend confirmation email' })).toBeEnabled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps a confirmation cooldown that was started in this browser', async () => {
+    localStorage.setItem(
+      'user-component-react:verification-email:me/../other',
+      String(Date.now() + 90_000),
+    );
+    get.mockResolvedValue({ data: { ...profile, emailVerified: false } });
+    renderProfile({ linkOrigin: 'https://grammarbar.com' });
+
+    expect(await screen.findByRole('button', { name: 'Resend in 1:30' })).toBeDisabled();
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('shows a wait message when confirmation email is rate limited', async () => {
+    const user = userEvent.setup();
+    get.mockResolvedValue({ data: { ...profile, emailVerified: false } });
+    post.mockRejectedValue({ isAxiosError: true, response: { status: 429, data: { detail: 'slow down' } } });
+    renderProfile({ linkOrigin: 'https://grammarbar.com' });
+
+    await user.click(await screen.findByRole('button', { name: 'Resend confirmation email' }));
+    expect(await screen.findByText('Too many attempts. Wait a minute and try again.')).toBeInTheDocument();
+    expect(screen.queryByText('slow down')).not.toBeInTheDocument();
   });
 
   it('deletes the account only after the email matches', async () => {
@@ -190,17 +226,18 @@ describe('UserService', () => {
     remove.mockResolvedValue({});
     renderProfile({ allowDelete: true, onSuccess, onError });
 
-    await user.click(await screen.findByRole('button', { name: 'Delete Profile' }));
-    const email = screen.getByRole('textbox', { name: 'Email Address' });
+    await user.click(await screen.findByRole('button', { name: 'Delete account' }));
+    const dialog = await screen.findByRole('dialog');
+    const email = within(dialog).getByRole('textbox', { name: 'Email' });
     await user.type(email, 'wrong@example.com');
-    await user.click(screen.getByRole('button', { name: 'Delete Profile' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Delete account' }));
 
     expect(await screen.findByText('Email does not match. Please enter your email address to confirm deletion.')).toBeInTheDocument();
     expect(remove).not.toHaveBeenCalled();
 
     await user.clear(email);
     await user.type(email, 'ada@example.com');
-    await user.click(screen.getByRole('button', { name: 'Delete Profile' }));
+    await user.click(within(dialog).getByRole('button', { name: 'Delete account' }));
 
     expect(await screen.findByText('Your account has been deleted successfully')).toBeInTheDocument();
     expect(onSuccess).toHaveBeenCalledWith('Your account has been deleted successfully');
