@@ -1,12 +1,16 @@
 import type { SxProps, Theme } from '@mui/material';
 
 export interface User {
-  id: number;
+  id: number | string;
   email: string;
   emailVerified: boolean;
   pictureUrl?: string;
   createdVia: string;
   authProviders: string[];
+  displayName?: string | null;
+  locale?: string | null;
+  timeZone?: string | null;
+  avatarUrl?: string | null;
 }
 
 export interface UserUrls {
@@ -54,6 +58,8 @@ export interface UserServiceProps {
    * The email prompt only confirms the click. The API must authorize DELETE.
    */
   allowDelete?: boolean;
+  /** Product whose marketing preference is shown. `grammarbar`, `costy`, or `repeaty`. */
+  product?: 'grammarbar' | 'costy' | 'repeaty';
   /** Optional class name for the root card. */
   className?: string;
   /** Optional MUI `sx` prop for the root card. Merged with the default layout. */

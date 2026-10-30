@@ -29,7 +29,9 @@ import {
   isCanceled,
   resendVerificationEmail,
   safePictureUrl,
+  saveProductPreference,
   toPublicError,
+  updateProfile,
   userPaths,
   type UserRequest,
 } from '../api';
@@ -175,6 +177,7 @@ export function UserService({
   onError,
   onSuccess,
   allowDelete = false,
+  product,
   className,
   sx,
 }: UserServiceProps) {
@@ -231,6 +234,14 @@ export function UserService({
       <CardContent>
         <Stack spacing={2.5} divider={showFacts || showActions ? <Divider /> : undefined}>
           <ProfileHeader user={user} />
+          <ProfileEditor
+            user={user}
+            endpoint={endpoint}
+            product={product}
+            signalRef={signalRef}
+            onSaved={(next) => setView({ status: 'ready', user: next })}
+            onError={onError}
+          />
           {showFacts && <ProfileFacts user={user} />}
           {showActions && (
             <AccountActions
@@ -276,6 +287,73 @@ function StatusCard({ className, sx, children }: { className?: string; sx: SxPro
   );
 }
 
+function ProfileEditor({
+  user,
+  endpoint,
+  product,
+  signalRef,
+  onSaved,
+  onError,
+}: {
+  user: User;
+  endpoint: UserEndpoint;
+  product?: 'grammarbar' | 'costy' | 'repeaty';
+  signalRef: RefObject<AbortSignal | null>;
+  onSaved: (user: User) => void;
+  onError?: (error: Error) => void;
+}) {
+  const [displayName, setDisplayName] = useState(user.displayName ?? '');
+  const [locale, setLocale] = useState(user.locale ?? '');
+  const [timeZone, setTimeZone] = useState(user.timeZone ?? '');
+  const [marketing, setMarketing] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const next = await updateProfile(
+        { ...endpoint, signal: signalRef.current ?? undefined },
+        { displayName, locale, timeZone, avatarUrl: user.avatarUrl ?? undefined },
+      );
+      if (product) {
+        await saveProductPreference({ ...endpoint, signal: signalRef.current ?? undefined }, product, marketing);
+      }
+      onSaved(next);
+      setMessage('Profile saved.');
+    } catch (caught) {
+      const publicError = toPublicError(caught, 'Unable to save the profile.');
+      setError(publicError.message);
+      onError?.(publicError);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Stack spacing={1.5}>
+      {message && <Alert severity="success">{message}</Alert>}
+      {error && <Alert severity="error">{error}</Alert>}
+      <TextField label="Display name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} fullWidth />
+      <TextField label="Locale" value={locale} onChange={(event) => setLocale(event.target.value)} fullWidth />
+      <TextField label="Time zone" value={timeZone} onChange={(event) => setTimeZone(event.target.value)} fullWidth />
+      {product && (
+        <Button type="button" variant="text" onClick={() => setMarketing((current) => !current)}>
+          {marketing ? 'Product email on' : 'Product email off'}
+        </Button>
+      )}
+      <Box>
+        <Button type="button" variant="contained" onClick={save} disabled={saving}>
+          {saving ? 'Saving...' : 'Save profile'}
+        </Button>
+      </Box>
+    </Stack>
+  );
+}
+
 function ProfileHeader({ user }: { user: User }) {
   const picture = safePictureUrl(user.pictureUrl);
   const [failedPicture, setFailedPicture] = useState<string | null>(null);
@@ -296,8 +374,13 @@ function ProfileHeader({ user }: { user: User }) {
       </Avatar>
       <Box sx={{ minWidth: 0 }}>
         <Typography variant="h6" component="h2" sx={{ overflowWrap: 'anywhere', lineHeight: 1.3 }}>
-          {user.email}
+          {user.displayName?.trim() || user.email}
         </Typography>
+        {user.displayName?.trim() && (
+          <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>
+            {user.email}
+          </Typography>
+        )}
         {(verified || unverified) && (
           <Chip
             size="small"

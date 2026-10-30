@@ -138,7 +138,30 @@ export function isUser(value: unknown): value is User {
   if (record.pictureUrl != null && typeof record.pictureUrl !== 'string') return false;
   if (record.createdVia != null && typeof record.createdVia !== 'string') return false;
   if (record.authProviders != null && !isStringArray(record.authProviders)) return false;
+  for (const field of ['displayName', 'locale', 'timeZone', 'avatarUrl'] as const) {
+    if (record[field] != null && typeof record[field] !== 'string') return false;
+  }
   return true;
+}
+
+export async function updateProfile(
+  request: UserRequest,
+  profile: { displayName?: string; locale?: string; timeZone?: string; avatarUrl?: string },
+): Promise<User> {
+  const response = await axios.patch(userUrl(request.apiUrl, request.userId, '/v0/user/me'), profile, requestConfig(request, jsonHeaders(request.bearerToken)));
+  return readUser(response.data);
+}
+
+export async function saveProductPreference(
+  request: UserRequest,
+  product: string,
+  marketingEmail: boolean,
+): Promise<void> {
+  await axios.put(
+    userUrl(request.apiUrl, request.userId, `/v0/user/me/preferences/${encodeURIComponent(product)}`),
+    { product, marketingEmail, settings: '{}' },
+    requestConfig(request, jsonHeaders(request.bearerToken)),
+  );
 }
 
 function isAxiosLike(error: unknown): error is { code?: string; response?: { status?: number } } {
