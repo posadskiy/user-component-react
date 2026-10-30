@@ -75,9 +75,16 @@ export async function fetchUser(request: UserRequest): Promise<User> {
   return readUser(response.data);
 }
 
-export async function deleteUser(request: UserRequest): Promise<void> {
-  await axios.delete(
-    userUrl(request.apiUrl, request.userId, request.path),
+/**
+ * Erases the sign-in account through auth-service. user-service `DELETE /v0/user/{id}` is limited to
+ * internal callers; people confirm erasure here with the word DELETE, plus the password when the
+ * account has one.
+ */
+export async function eraseAccount(request: UserRequest, password: string): Promise<void> {
+  const trimmedPassword = password.trim();
+  await axios.post(
+    userUrl(request.apiUrl, '', '/account/erase'),
+    { confirmation: 'DELETE', ...(trimmedPassword ? { password: trimmedPassword } : {}) },
     requestConfig(request, jsonHeaders(request.bearerToken)),
   );
 }

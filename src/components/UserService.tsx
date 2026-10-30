@@ -24,7 +24,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import MarkEmailUnreadIcon from '@mui/icons-material/MarkEmailUnread';
 import {
   defaultVerificationEmailPath,
-  deleteUser,
+  eraseAccount,
   fetchUser,
   isCanceled,
   resendVerificationEmail,
@@ -83,9 +83,8 @@ function cooldownLabel(remainingMs: number): string {
   return `Resend in ${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
-type UserEndpoint = Pick<UserServiceProps, 'apiUrl' | 'userId' | 'bearerToken'> & {
+type UserEndpoint = Pick<UserServiceProps, 'apiUrl' | 'userId' | 'bearerToken' | 'authApiUrl'> & {
   getPath: string;
-  deletePath: string;
 };
 
 type ProfileView =
@@ -187,15 +186,14 @@ export function UserService({
     userId,
     bearerToken,
     getPath: paths.get,
-    deletePath: paths.delete,
     onError,
   });
   const endpoint: UserEndpoint = {
     apiUrl,
     userId,
     bearerToken,
+    authApiUrl,
     getPath: paths.get,
-    deletePath: paths.delete,
   };
   const cardSx = (sx ? [defaultCardSx, sx] : defaultCardSx) as SxProps<Theme>;
 
@@ -550,6 +548,7 @@ function AccountActions({
         <DeleteProfileForm
           user={user}
           endpoint={endpoint}
+          authApiUrl={authApiUrl}
           signalRef={signalRef}
           onClose={() => setDeleteOpen(false)}
           onDeleted={onDeleted}
@@ -568,6 +567,7 @@ interface DeleteResult {
 function DeleteProfileForm({
   user,
   endpoint,
+  authApiUrl,
   signalRef,
   onClose,
   onDeleted,
@@ -575,6 +575,7 @@ function DeleteProfileForm({
 }: {
   user: User;
   endpoint: UserEndpoint;
+  authApiUrl: string;
   signalRef: RefObject<AbortSignal | null>;
   onClose: () => void;
   onDeleted: () => void;
@@ -594,8 +595,12 @@ function DeleteProfileForm({
       }
 
       const signal = signalRef.current;
+      const password = String(formData.get('password') ?? '');
       try {
-        await deleteUser(requestOf(endpoint, signal, endpoint.deletePath));
+        await eraseAccount(
+          { ...requestOf(endpoint, signal, '/account/erase'), apiUrl: authApiUrl },
+          password,
+        );
         if (!signal?.aborted) onDeleted();
         return { error: null, submittedEmail };
       } catch (error) {
@@ -625,7 +630,8 @@ function DeleteProfileForm({
         <DialogTitle id={titleId}>Delete account</DialogTitle>
         <DialogContent>
           <DialogContentText id={descriptionId}>
-            This permanently deletes the account and its data. Enter <strong>{user.email}</strong> to confirm.
+            This permanently erases the sign-in account. Enter <strong>{user.email}</strong> to confirm.
+            If you sign in with a password, enter that too.
           </DialogContentText>
           {deleteError && (
             <Alert severity="error" sx={{ mt: 2 }}>
@@ -647,6 +653,17 @@ function DeleteProfileForm({
             required
             error={Boolean(deleteError)}
             sx={{ mt: 2 }}
+          />
+          <TextField
+            margin="dense"
+            label="Password"
+            type="password"
+            name="password"
+            fullWidth
+            variant="outlined"
+            disabled={pending}
+            autoComplete="current-password"
+            helperText="Required when this account has a password."
           />
         </DialogContent>
         <DialogActions>

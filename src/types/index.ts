@@ -15,14 +15,14 @@ export interface User {
 
 export interface UserUrls {
   /**
-   * Path or absolute URL used for GET and DELETE when a method does not set its own.
+   * Path or absolute URL used for GET when a method does not set its own.
    * `{userId}` is replaced with the encoded id. Default: `/v0/user/{userId}`.
    * An absolute `http` or `https` URL is called as-is. Any other value is appended to `apiUrl`.
    */
   user?: string;
   /** GET path or absolute URL. Falls back to `user`. */
   get?: string;
-  /** DELETE path or absolute URL. Falls back to `user`. */
+  /** Kept so existing hosts still type-check. Erasure is `POST /account/erase` on auth-service. */
   delete?: string;
   /**
    * POST path or absolute URL for resending the confirmation email.
@@ -36,7 +36,7 @@ export interface UserServiceProps {
   apiUrl: string;
   userId: string;
   /**
-   * Resource URLs. Omit this to keep `GET` and `DELETE` on `/v0/user/{userId}`.
+   * Resource URLs. Omit this to load the profile from `GET /v0/user/{userId}`.
    */
   urls?: UserUrls;
   /** Bearer token for authenticated requests to /v0/user/me and related endpoints. When omitted, requests are sent without Authorization (may get 401). */
@@ -54,8 +54,9 @@ export interface UserServiceProps {
   onError?: (error: Error) => void;
   onSuccess?: (message: string) => void;
   /**
-   * Show the account-deletion action. Defaults to false.
-   * The email prompt only confirms the click. The API must authorize DELETE.
+   * Show the account-erasure action. Defaults to false.
+   * The email prompt confirms the click. The request goes to auth-service `POST /account/erase`
+   * (`authApiUrl`, or `apiUrl` when that is omitted). A password is sent when the field is filled.
    */
   allowDelete?: boolean;
   /** Product whose marketing preference is shown. `grammarbar`, `costy`, or `repeaty`. */

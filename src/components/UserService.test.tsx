@@ -224,7 +224,7 @@ describe('UserService', () => {
     const onError = vi.fn();
     get.mockResolvedValue({ data: profile });
     remove.mockResolvedValue({});
-    renderProfile({ allowDelete: true, onSuccess, onError });
+    renderProfile({ allowDelete: true, authApiUrl: 'http://localhost:8100', onSuccess, onError });
 
     await user.click(await screen.findByRole('button', { name: 'Delete account' }));
     const dialog = await screen.findByRole('dialog');
@@ -237,13 +237,15 @@ describe('UserService', () => {
 
     await user.clear(email);
     await user.type(email, 'ada@example.com');
+    await user.type(within(dialog).getByLabelText('Password'), 'correct horse');
     await user.click(within(dialog).getByRole('button', { name: 'Delete account' }));
 
     expect(await screen.findByText('Your account has been deleted successfully')).toBeInTheDocument();
     expect(onSuccess).toHaveBeenCalledWith('Your account has been deleted successfully');
     expect(onError).not.toHaveBeenCalled();
-    expect(remove).toHaveBeenCalledWith(
-      'http://localhost:8095/v0/user/me%2F..%2Fother',
+    expect(post).toHaveBeenCalledWith(
+      'http://localhost:8100/account/erase',
+      { confirmation: 'DELETE', password: 'correct horse' },
       expect.objectContaining({
         headers: {
           Authorization: 'Bearer super-secret',
@@ -253,5 +255,6 @@ describe('UserService', () => {
         timeout: requestTimeoutMs,
       }),
     );
+    expect(remove).not.toHaveBeenCalled();
   });
 });
